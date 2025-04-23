@@ -6,6 +6,7 @@ import argparse
 import re
 import requests
 import http.cookiejar
+from math import ceil
 
 
 def lead0(num, max):
@@ -103,12 +104,26 @@ for urlCount, url in enumerate(args.url):
         headerSrc = None
 
     data = []
-    page = pq(s.get(f'https://tapas.io/series/{seriesId}/episodes?page=1&sort=OLDEST&max_limit=99999999')  # It's over 9000! But I love that they forgot to limit the max_limit, because that means I don't have to bother with pagination ^^
-              .json()['data']['body'])
-    for episode in page('[data-permalink*="/episode/"]'):
-        data.append({'id': int(episode.attrib['data-permalink'][episode.attrib['data-permalink'].rfind('/') + 1:])})
 
-    printLine('{} [{}] ({} pages):'.format(name, urlName, len(data)))
+    # Iterate through all the pages of the episode listing
+    page = 1
+    while True:
+        printLine(f'Getting episode listing, page {page}')
+
+        rq = s.get(f'https://tapas.io/series/{seriesId}/episodes?page={page}&sort=OLDEST').json()
+        json_data = rq['data']['body']
+        
+        page_data = pq(json_data)
+        for episode in page_data('[data-permalink*="/episode/"]'):
+            data.append({'id': int(episode.attrib['data-permalink'][episode.attrib['data-permalink'].rfind('/') + 1:])})
+
+        page += 1
+        # Make sure there is another page to fetch
+        pagination_data = rq['data']['pagination']
+        if ceil(pagination_data['total'] / pagination_data['original_max_limit']) < page:
+            break
+
+    printLine('{} [{}] ({} episodes):'.format(name, urlName, len(data)))
 
     # Check if folder exsists, if not create it
     printLine('Checking folder...', True)
@@ -186,7 +201,7 @@ for urlCount, url in enumerate(args.url):
 
                 printLine('Downloaded image data from {} images (pages {}/{})...'.format(allImgCount, pageCount + pageOffset, len(data) + pageOffset), True)
 
-                pageData['title'] = pageHtml('.info__title').text()
+                pageData['title'] = pageHtml('.js-ep-title').text()
 
                 pageData['imgs'] = []
                 for img in pageHtml('.content__img'):
@@ -204,7 +219,7 @@ for urlCount, url in enumerate(args.url):
                 if pageData['imgs'][0] != "PageUnavailable":
                     # If the entry isn't a dummy entry, go ahead and download the images it contains.
                     with open(os.path.join(savePath, check_path('{} - {} - {} - {} - #{}.{}'.format(lead0(imgCount + imgOffset, allImgCount + imgOffset), lead0(pageCount + pageOffset, len(pageData) + pageOffset),
-                                                                                                    lead0(imgOfPageCount, len(pageData['imgs'])), pageData['title'], pageData['id'], img[img.rindex('.') + 1:]),
+                                                                                                    lead0(imgOfPageCount, len(pageData['imgs'])), pageData['title'], pageData['id'], img[img.rindex('.') + 1:img.index('*~')]),
                                                                 fat=args.restrict_characters)), 'wb') as f:
                         f.write(s.get(img).content)
 
